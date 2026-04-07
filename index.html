@@ -281,10 +281,7 @@ input[type=checkbox]{
       <div class="card-title">Cuotas — próximos 3 meses</div>
       <div id="dash-cuotas"></div>
     </div>
-    <div class="card">
-      <div class="card-title">Gastos fijos — pendientes de carga este mes</div>
-      <div id="dash-fijos-pendientes"></div>
-    </div>
+
   </div>
 
   <!-- CARGAR MOVIMIENTO -->
@@ -301,7 +298,7 @@ input[type=checkbox]{
           <label>Categoría</label>
           <select id="g-cat" onchange="onCatChange()"></select>
           <div class="quick-add">
-            <input id="g-newcat-name" placeholder="Nueva categoría..." />
+            <input id="g-newcat-name" placeholder="Nueva categoría..." style="min-width:220px;" />
             <select id="g-newcat-tipo">
               <option value="variable">Variable</option>
               <option value="fija">Fija</option>
@@ -322,7 +319,7 @@ input[type=checkbox]{
         </div>
         <div class="form-group">
           <label>Monto ($)</label>
-          <input id="g-monto" type="number" placeholder="0" min="0" />
+          <input id="g-monto" type="text" inputmode="decimal" placeholder="0,00" />
         </div>
         <div class="form-group">
           <label>Pagador / Quien cobra</label>
@@ -473,7 +470,7 @@ input[type=checkbox]{
       <div class="form-grid" style="margin-bottom:12px">
         <div class="form-group">
           <label>Monto estimado ($)</label>
-          <input id="f-monto" type="number" placeholder="0" min="0" />
+          <input id="f-monto" type="text" inputmode="decimal" placeholder="0,00" />
         </div>
         <div class="form-group">
           <label>Día de vencimiento</label>
@@ -787,8 +784,31 @@ function showSyncIndicator(state){
 }
 
 // ── HELPERS ───────────────────────────────────────────────────────────────────
-function fmt(n){return '$'+Math.round(n).toLocaleString('es-AR');}
+function fmt(n){return '$'+Number(n).toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2});}
 function gastosDelMes(y,m){return S.gastos.filter(g=>g.year===y&&g.month===m);}
+
+// ── FORMATO MONTO (10.000,00) ─────────────────────────────────────────────────
+function parseMonto(str){
+  if(!str)return NaN;
+  let s=String(str).trim().replace(/\s/g,'');
+  if(s.includes(','))s=s.replace(/\./g,'').replace(',','.');
+  return parseFloat(s);
+}
+function formatMontoInput(input){
+  let raw=input.value.replace(/[^\d,]/g,'');
+  let parts=raw.split(',');
+  let intPart=parts[0].replace(/\B(?=(\d{3})+(?!\d))/g,'.');
+  input.value=parts.length>1?intPart+','+(parts[1]||''):intPart;
+}
+function bindMontoInput(id){
+  const el=document.getElementById(id);
+  if(!el)return;
+  el.addEventListener('input',()=>formatMontoInput(el));
+  el.addEventListener('blur',()=>{
+    const n=parseMonto(el.value);
+    if(!isNaN(n))el.value=n.toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2});
+  });
+}
 function toast(msg,ms=2500){const t=document.getElementById('toast');t.textContent=msg;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),ms);}
 function destroyChart(id){if(chartInstances[id]){chartInstances[id].destroy();delete chartInstances[id];}}
 function getCat(nombre){
@@ -1281,7 +1301,7 @@ function limpiarGasto(){
 }
 function guardarGasto(){
   const desc=document.getElementById('g-desc').value.trim();
-  const monto=parseFloat(document.getElementById('g-monto').value);
+  const monto=parseMonto(document.getElementById('g-monto').value);
   const cat=document.getElementById('g-cat').value;
   const tipo=document.getElementById('g-tipo').value;
   const clase=document.getElementById('g-clase').value;
@@ -1328,7 +1348,7 @@ function renderGastos(){
 // ── FIJOS ─────────────────────────────────────────────────────────────────────
 function guardarFijo(){
   const desc=document.getElementById('f-desc').value.trim();
-  const monto=parseFloat(document.getElementById('f-monto').value);
+  const monto=parseMonto(document.getElementById('f-monto').value);
   const cat=document.getElementById('f-cat').value;
   const dia=parseInt(document.getElementById('f-dia').value)||1;
   const pagador=document.getElementById('f-pagador').value||null;
@@ -1376,7 +1396,7 @@ function renderCierre(){
       <td><div class="cat-row">${catDot(g.cat)}<span>${g.desc}</span></div></td>
       <td>${catBadge(g.cat)}</td>
       <td>${pagadorChip(g.pagador)}</td>
-      <td class="td-right"><input class="inline-input" type="number" value="${Math.round(g.monto)}" onchange="actualizarMontoFijo(${g.id},this.value)" /></td>
+      <td class="td-right"><input class="inline-input" type="text" inputmode="decimal" value="${Number(g.monto).toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2})}" onchange="actualizarMontoFijo(${g.id},this.value)" /></td>
       <td style="color:var(--text3)">Día ${g.dia||'—'}</td>
     </tr>`).join('');
     html+=`<table><thead><tr><th>Descripción</th><th>Categoría</th><th>Pagador</th><th class="td-right">Monto este mes</th><th>Venc.</th></tr></thead><tbody>${rows}</tbody></table></div>`;
@@ -1402,7 +1422,7 @@ function renderCierre(){
         <tbody>`;
     pendientes.forEach(f=>{
       // show existing monto formatted if > 0, else empty placeholder
-      const montoVal=f.monto>0?f.monto.toFixed(2):'';
+      const montoVal=f.monto>0?Number(f.monto).toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2}):'';
       const isChecked=f.monto>0;
       html+=`<tr id="fila-${f.id}">
         <td><input type="checkbox" class="fijo-chk" data-id="${f.id}" ${isChecked?'checked':''} /></td>
@@ -1443,8 +1463,8 @@ function toggleAllFijos(val){
 
 function onFijoMontoInput(input, fijoId){
   // auto-tick the checkbox when the user types a value
-  const val=input.value.replace(/[^0-9.,]/g,'');
-  const num=parseFloat(val.replace(',','.'));
+  const val=input.value;
+  const num=parseMonto(val);
   const chk=document.querySelector(`.fijo-chk[data-id="${fijoId}"]`);
   if(chk){
     chk.checked=!isNaN(num)&&num>0;
@@ -1459,20 +1479,16 @@ function onFijoMontoInput(input, fijoId){
 }
 
 function formatFijoMonto(input){
-  // on blur, format as $1234.56
-  const raw=input.value.replace(/[^0-9.,]/g,'').replace(',','.');
-  const num=parseFloat(raw);
+  const num=parseMonto(input.value);
   if(!isNaN(num)&&num>0){
-    input.value='$'+num.toFixed(2);
+    input.value=num.toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2});
   }else{
     input.value='';
   }
 }
 
 function parseFijoMonto(input){
-  // extract numeric value from formatted string like "$1234.56"
-  const raw=(input.value||'').replace(/[^0-9.,]/g,'').replace(',','.');
-  return parseFloat(raw)||0;
+  return parseMonto(input.value)||0;
 }
 
 function fijoMontoKeydown(e, input){
@@ -1523,13 +1539,13 @@ function importarFijos(){
     monto:f.monto,esFijo:true,esCuota:false,year:S.cy,month:S.cm,medio:'—',fecha,dia:f.dia,pagador:f.pagador||null}));
   save();toast('Gastos fijos importados.');renderCierre();
 }
-function actualizarMontoFijo(id,val){const g=S.gastos.find(x=>x.id===id);if(g){g.monto=parseFloat(val)||0;save();}}
+function actualizarMontoFijo(id,val){const g=S.gastos.find(x=>x.id===id);if(g){g.monto=parseMonto(val)||0;save();}}
 
 function importarFijoUnicoConMonto(fijoId){
   const f=S.fijos.find(x=>x.id===fijoId);
   if(!f)return;
   const input=document.getElementById('dash-monto-'+fijoId);
-  const monto=input?parseFloat(input.value):f.monto;
+  const monto=input?parseMonto(input.value):f.monto;
   if(!monto||monto<=0){
     if(input){input.style.borderColor='var(--red)';input.focus();}
     toast('Ingresá el importe antes de cargar.');
@@ -2050,6 +2066,8 @@ async function bajarDeFirebase(){
   populatePagadorSelects();
   renderDashboard();
   toggleCuotas();
+  bindMontoInput('g-monto');
+  bindMontoInput('f-monto');
 })();
 </script>
 </body>
