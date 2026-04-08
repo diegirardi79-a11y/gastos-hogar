@@ -695,33 +695,63 @@ let pendingDeleteId=null,pendingDeleteType=null;
 
 // ── STORAGE ───────────────────────────────────────────────────────────────────
 async function loadState(){
-  // 1. Load local first (instant)
-  try{const stored=localStorage.getItem('hogar_v5');if(stored)S=JSON.parse(stored);}catch(e){}
+  // 1. Cargar local como fallback rápido
+  let localData=null;
+  try{const stored=localStorage.getItem('hogar_v5');if(stored)localData=JSON.parse(stored);}catch(e){}
+
+  // 2. Si Firebase está conectado, SIEMPRE intentar bajar la nube primero
+  if(fbDb){
+    try{
+      showSyncIndicator('syncing');
+      const doc=await fbDb.collection('hogares').doc(fbDocId).get();
+      if(doc.exists){
+        const cloud=doc.data();
+        const cloudTs=cloud._updatedAt||'';
+        const localTs=(localData&&localData._updatedAt)||'';
+        // Usar nube si: no hay datos locales, O la nube es más nueva
+        if(!localData||cloudTs>=localTs){
+          delete cloud._updatedAt;delete cloud._device;
+          S=cloud;
+          try{localStorage.setItem('hogar_v5',JSON.stringify(S));}catch(e){}
+          showSyncIndicator('ok');
+        }else{
+          // datos locales son más nuevos — usar locales
+          S=localData;
+        }
+      }else if(localData){
+        // no hay datos en nube todavía — usar locales
+        S=localData;
+      }
+    }catch(e){
+      console.warn('Firebase load error:',e);
+      showSyncIndicator('error');
+      if(localData)S=localData;
+    }
+  }else if(localData){
+    S=localData;
+  }
+
   const now=new Date();
-  // always open on current month
   S.cy=now.getFullYear();
   S.cm=now.getMonth();
   if(!S.gastos)S.gastos=[];
   if(!S.fijos)S.fijos=[];
   if(!S.pagadores)S.pagadores=[];
   if(!S.categorias||!S.categorias.length)S.categorias=DEFAULT_CATS.map(c=>({...c}));
-  // migrate old cats that lack clase/subcat fields
+
+  // Migrar categorías viejas
   const SUBCAT_COLOR_MAP={'BONORINO':'bonorino','AUTO':'autocolor','TARJETAS':'tarjetas','QUIRNO':'quirno','CHICOS':'chicos'};
   S.categorias.forEach(c=>{
     if(!c.clase)c.clase='GASTOS';
     if(!c.subcat)c.subcat='';
-    // auto-populate subcats array from the Excel subcat field if not already there
     if(c.subcat&&(!c.subcats||!c.subcats.includes(c.subcat))){
       if(!c.subcats)c.subcats=[];
       if(!c.subcats.includes(c.subcat))c.subcats.unshift(c.subcat);
     }
-    // migrate color to group-based color if subcat matches
-    if(SUBCAT_COLOR_MAP[c.subcat]){
-      c.color=SUBCAT_COLOR_MAP[c.subcat];
-    }
+    if(SUBCAT_COLOR_MAP[c.subcat])c.color=SUBCAT_COLOR_MAP[c.subcat];
   });
-  // auto-sync: every categoria tipo=fija should exist in S.fijos
-  // add missing ones (don't remove manually-added fijos)
+
+  // Auto-sync fijos desde categorías fijas
   S.categorias.filter(c=>c.tipo==='fija'&&c.clase==='GASTOS').forEach(c=>{
     const yaExiste=S.fijos.some(f=>f.catId===c.id||f.cat===c.nombre);
     if(!yaExiste){
@@ -737,24 +767,6 @@ async function loadState(){
       });
     }
   });
-  // 2. If Firebase is connected, fetch cloud data and merge (cloud wins if newer)
-  if(fbDb){
-    try{
-      const doc=await fbDb.collection('hogares').doc(fbDocId).get();
-      if(doc.exists){
-        const cloud=doc.data();
-        const cloudTs=cloud._updatedAt||'';
-        const localTs=S._updatedAt||'';
-        if(cloudTs>localTs){
-          // cloud is newer — use it
-          delete cloud._updatedAt;delete cloud._device;
-          Object.assign(S,cloud);
-          S.cy=new Date().getFullYear();S.cm=new Date().getMonth();
-          try{localStorage.setItem('hogar_v5',JSON.stringify(S));}catch(e){}
-        }
-      }
-    }catch(e){console.warn('Firebase load error:',e);}
-  }
 }
 function save(){
   // always save locally first
@@ -2058,6 +2070,29 @@ async function bajarDeFirebase(){
   if(cfg)initFirebase(cfg);
 })();
 
+// ── REALTIME LISTENER ────────────────────────────────────────────────────────
+let realtimeUnsub=null;
+function startRealtimeListener(){
+  if(!fbDb||realtimeUnsub)return;
+  realtimeUnsub=fbDb.collection('hogares').doc(fbDocId).onSnapshot(doc=>{
+    if(!doc.exists)return;
+    const cloud=doc.data();
+    const cloudTs=cloud._updatedAt||'';
+    const localTs=S._updatedAt||'';
+    // Solo actualizar si la nube tiene datos más nuevos que los actuales en memoria
+    if(cloudTs>localTs){
+      delete cloud._updatedAt;delete cloud._device;
+      S=cloud;
+      const now=new Date();S.cy=now.getFullYear();S.cm=now.getMonth();
+      try{localStorage.setItem('hogar_v5',JSON.stringify(S));}catch(e){}
+      populateCatSelects();populatePagadorSelects();
+      const active=document.querySelector('.view.active');
+      if(active)renderView(active.id.replace('view-',''));
+      showSyncIndicator('ok');
+    }
+  },err=>console.warn('Realtime listener error:',err));
+}
+
 // ── INIT ──────────────────────────────────────────────────────────────────────
 (async()=>{
   await loadState();
@@ -2068,6 +2103,7 @@ async function bajarDeFirebase(){
   toggleCuotas();
   bindMontoInput('g-monto');
   bindMontoInput('f-monto');
+  startRealtimeListener();
 })();
 </script>
 </body>
